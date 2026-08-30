@@ -1,0 +1,79 @@
+/* themes/tokens.css
+ * 月言博客 · 双主题设计令牌（设计稿唯一依据）
+ *
+ * 来源：《月言 · Style Guide》/《Style Guide Light》画板（boke.pen variables 提取）：
+ *   - 冷月 cool-moon（dark）：bg #0B0F1A 深蓝夜色 · text #E8ECF4 月白 · accent #A8B8D8 月辉银
+ *   - 薄雾 mist（light）：   bg #F4F6FA 雾白     · text #1A2233 墨灰  · accent #3E5478 天青
+ *
+ * 切换方式：根元素 data-theme="cool-moon" | "mist"，即时生效（需求文档 2.1）。
+ * 语义说明：
+ *   bg 页面背景 / elevated 卡片背景 / muted 弱化底色 / border 描边
+ *   text 主文字 / text-2 次文字 / text-3 三级文字
+ *   accent 强调色 / accent-soft 强调弱底 / glow 高亮 / like 点赞色 / on-accent 强调色上的文字
+ */
+
+/* ---------- 动画节奏令牌（全站动效统一，双主题一致） ---------- */
+:root {
+  --yy-duration-fast: 150ms; /* 按压/遮罩等即时反馈 */
+  --yy-duration-base: 240ms; /* hover/颜色等常规微交互 */
+  --yy-duration-slow: 400ms; /* 区块级进场 */
+  --yy-ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* 出场减速（丝滑基调） */
+  --yy-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1); /* 轻微回弹（点赞弹跳） */
+}
+
+/* ---------- 冷月（暗色 · 深夜护眼） ---------- */
+:root,
+:root[data-theme="cool-moon"] {
+  /* 色板 */
+  --yy-bg: #0b0f1a; /* 深蓝夜色（页面背景） */
+  --yy-elevated: #121826; /* 卡片/浮层背景 */
+  --yy-muted: #1a2233; /* 弱化底色（Tab 未选中/悬停） */
+  --yy-border: #2a3348; /* 低对比描边 */
+  --yy-text: #e8ecf4; /* 月白（主文字） */
+  --yy-text-2: #9aa6bc; /* 灰蓝（次文字） */
+  --yy-text-3: #6b7690; /* 三级文字 */
+  --yy-accent: #a8b8d8; /* 月辉银（强调） */
+  --yy-accent-soft: #a8b8d826; /* 强调弱底 */
+  --yy-glow: #c5d0e8; /* 高亮（选中文字/链接） */
+  --yy-like: #c97b8a; /* 点赞红 */
+  --yy-on-accent: #0b0f1a; /* 强调色上的文字 */
+
+  /* 字体 */
+  --yy-font-display: "Playfair Display", "Georgia", "Noto Serif SC", "Songti SC", serif;
+  --yy-font-ui: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* 圆角与阴影（设计稿细节，统一令牌） */
+  --yy-radius-sm: 8px;
+  --yy-radius-md: 12px;
+  --yy-radius-lg: 16px;
+  --yy-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --yy-shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- 薄雾（亮色 · 日间通透） ---------- */
+:root[data-theme="mist"] {
+  /* 色板 */
+  --yy-bg: #f4f6fa; /* 雾白（页面背景） */
+  --yy-elevated: #ffffff; /* 纯白卡片 */
+  --yy-muted: #e8ecf4; /* 弱化底色 */
+  --yy-border: #d5dce8; /* 浅灰描边 */
+  --yy-text: #1a2233; /* 墨灰（主文字） */
+  --yy-text-2: #5c6b82; /* 中灰（次文字） */
+  --yy-text-3: #8b97ab; /* 三级文字 */
+  --yy-accent: #3e5478; /* 天青（强调） */
+  --yy-accent-soft: #3e547818; /* 强调弱底 */
+  --yy-glow: #3e5478; /* 高亮 */
+  --yy-like: #b86b7a; /* 点赞红 */
+  --yy-on-accent: #ffffff; /* 强调色上的文字 */
+
+  /* 字体（与冷月一致） */
+  --yy-font-display: "Playfair Display", "Georgia", "Noto Serif SC", "Songti SC", serif;
+  --yy-font-ui: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+
+  /* 圆角与阴影 */
+  --yy-radius-sm: 8px;
+  --yy-radius-md: 12px;
+  --yy-radius-lg: 16px;
+  --yy-shadow-card: 0 4px 24px rgba(31, 42, 64, 0.08);
+  --yy-shadow-card-hover: 0 8px 32px rgba(31, 42, 64, 0.16);
+}

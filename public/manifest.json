@@ -1,0 +1,69 @@
+{
+  "manifest_version": 3,
+  "name": "月言博客助手",
+  "version": "0.27.0",
+  "minimum_chrome_version": "110",
+  "description": "月言博客平台的浏览器侧边栏助手：站点动态、AI 问答与开放接口中心，凭站点 URL + API Key 连接使用。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "打开月言博客助手",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "options_page": "src/sidepanel/index.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "file://*/*"
+      ],
+      "js": [
+        "content-ball.js",
+        "content-dock.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/sidepanel/index.html",
+        "icons/icon-*.png"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ],
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "bookmarks",
+    "favicon",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "unlimitedStorage"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "host_permissions": []
+}

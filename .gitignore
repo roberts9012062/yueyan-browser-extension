@@ -1,0 +1,5 @@
+# 月言浏览器插件工程 .gitignore
+node_modules/
+*.tsbuildinfo
+.DS_Store
+*.log
