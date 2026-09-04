@@ -413,6 +413,7 @@ IndexedDB 例外（扩展页面 origin，存储结构化大数据）：
    - Chrome Web Store（[chrome.google.com/webstore/devconsole](https://chrome.google.com/webstore/devconsole)）
    - Microsoft Edge Add-ons（[partner.microsoft.com/dashboard/microsoftedge](https://partner.microsoft.com/dashboard/microsoftedge)）
 3. 商店描述、截图两店保持一致；商店审核被拒原因记录进 `CHANGELOG.md` 备忘。
+4. **开源仓库**（v0.35.0 起）：插件在 [github.com/roberts9012062/yueyan-browser-extension](https://github.com/roberts9012062/yueyan-browser-extension) 以 MIT 开源；主仓 `browser-extension/` 为开发源，经 `git subtree split -P browser-extension` 同步推送（含完整历史）。打 tag `v*` 后 GitHub Actions 自动「tsc 检查 → vite 构建 → 打包 zip → 附到 Release」；仓库地址在插件「设置 → 关于」展示（`shared/repo.ts` 唯一来源）。
 4. 发布前必须完成第 12 章全部清单项。
 
 ---
