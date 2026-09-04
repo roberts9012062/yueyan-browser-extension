@@ -40,6 +40,23 @@ npm run build   # 产物输出 dist/，浏览器加载该目录
 2. 在「站点连接」中填入你的月言博客站点地址与开放接口 API Key（站点后台「接口开放」生成）；
 3. 开始使用。详细功能与开发规范见[开发手册](docs/browser-extension-guide.md)。
 
+## 配套站点插件
+
+浏览器插件的「发布图床 · TG 通道」依赖站点侧安装 **TG图床** 插件（月言插件市场，免费官方）。
+
+### ✈️ [TG图床（tg-image-bed）](https://github.com/roberts9012062/yueyan-plugins/tree/main/tg-image-bed)
+
+图片上传直达 **Telegram 频道**（Bot API `sendDocument` 原图保真），访客经站长自备的 [Cloudflare Worker 反代](https://github.com/roberts9012062/yueyan-plugins/blob/main/tg-image-bed/worker/README.md) 读图——Bot Token 只存在服务端，浏览器永远拿不到。
+
+- **浏览器插件联动**：发说说 / 发文章插图时选择「TG 图床」通道，图片经开放接口 `tg-image-bed.upload` 直传频道（跳过前端压缩，保真），返回 Worker 直链插入正文；
+- **站点后台图库**：上传历史、批量删除、复制 Markdown/URL；
+- **图片体检（v0.4+）**：扫描全站说说与文章的正文图片，自动分类「外部图片（外链易失效）/ 本地图片（占服务器空间）/ 已TG」，勾选一键转存到 TG 图床并**自动替换帖子正文链接**——外链图搬家、服务器图片减负；
+- **限制**：单图 ≤ 20MB（Telegram Bot API 上限）；webp 会被 TG 转为贴纸存储、gif 会转为 mp4 动画（Bot API 固有行为，直链照常可访问）。
+
+**传送门**：[插件源码与文档](https://github.com/roberts9012062/yueyan-plugins/tree/main/tg-image-bed) · [安装包下载（Releases）](https://github.com/roberts9012062/yueyan-plugins/releases) · [月言插件库](https://github.com/roberts9012062/yueyan-plugins)
+
+安装方式：站点后台 → 插件市场 → 搜索「TG图床」→ 安装 → 在插件设置中完成 Bot Token / Chat ID / 反代 Worker 地址三件套配对（详见插件 README）。
+
 ## 开发
 
 - 技术栈：TypeScript（strict）+ Vite + React 19 + Tailwind CSS v4，Manifest V3
