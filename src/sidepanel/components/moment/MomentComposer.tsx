@@ -2,23 +2,27 @@
 // 写说说发布器（面板首页底部）：文字 + 四类附件（图/视频/音乐/链接）+ 可见性 + 发布。
 //
 // 行为：
-//   - 图片：本地多选 / 剪贴板粘贴 → 本地压缩（>1MB）→ media.upload 上传 → 缩略图附件；
+//   - 图片双通道：TG图床可用（挂载时探测缓存）→ 点按钮先弹通道选择（服务器 / TG图床原图）；
+//     不可用 → 直接文件选择器走服务器。两通道均为本地多选；粘贴恒走服务器通道；
+//     服务器通道 >1MB 自动压缩，TG 通道直传原图保真（无媒体库 ID，仅正文引用）；
 //   - 视频 / 音乐 / 链接：底部弹层贴链接，前端解析（compose.ts）后进附件条；
-//   - 发布：组装 HTML（buildMomentHtml）→ posts.create（moment / html / published）；
+//   - 发布：组装 HTML（buildMomentHtml）→ posts.create（moment / html / published），
+//     media_ids 仅收集服务器通道图片（TG 图经正文 <img src> 引用）；
 //   - 校验：正文与附件至少一项、纯文本 ≤2000 字；成功清空并提示，失败显示后端 message。
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent } from 'react';
 
 import { ApiError } from '../../../shared/api/client';
-import { createMomentPost, uploadMedia } from '../../../shared/api/endpoints';
-import type { InsertKind, MomentAttach, PluginSettings, UploadResult } from '../../../shared/types';
+import { createMomentPost } from '../../../shared/api/endpoints';
+import type { ImageUploadTarget, InsertKind, MomentAttach, PluginSettings } from '../../../shared/types';
 import { AttachBar } from './AttachBar';
-import { LinkSheet, MusicSheet, VideoSheet } from './InsertSheets';
+import { ImageSheet, LinkSheet, MusicSheet, VideoSheet } from './InsertSheets';
 import { MomentIcon } from './MomentIcons';
 import { VisibilityToggle } from '../VisibilityToggle';
-import { MOMENT_MAX_CHARS, buildMomentHtml, compressImageFile, countChars, newAttachId, parseMusicUrl, parseVideoUrl } from './compose';
+import { MOMENT_MAX_CHARS, buildMomentHtml, countChars, newAttachId, parseMusicUrl, parseVideoUrl } from './compose';
 import type { ParsedVideo } from './compose';
+import { useImageUpload } from './use-image-upload';
 
 interface MomentComposerProps {
   settings: PluginSettings;
@@ -40,12 +44,20 @@ export function MomentComposer(props: MomentComposerProps) {
   const [attaches, setAttaches] = useState<MomentAttach[]>([]);
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   const [sheet, setSheet] = useState<InsertKind | null>(null);
-  const [uploading, setUploading] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [notice, setNotice] = useState<ComposerNotice | null>(null);
 
+  // 图片双通道上传（uploading 态与 TG图床可用性探测均在 hook 内）
+  const { uploading, tgBedReady, uploadToServer, uploadToTg } = useImageUpload(settings, {
+    onAttach: (attach: MomentAttach): void => {
+      setAttaches((prev: MomentAttach[]): MomentAttach[] => [...prev, attach]);
+    },
+    onFail: (text: string): void => setNotice({ kind: 'err', text }),
+  });
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tgFileInputRef = useRef<HTMLInputElement>(null);
 
   // 成功提示 3 秒自散（错误提示常驻，下次操作时清除）
   useEffect((): (() => void) => {
@@ -65,49 +77,37 @@ export function MomentComposer(props: MomentComposerProps) {
     }
   };
 
-  /** 批量上传图片：逐张压缩 → media.upload → 附件；失败聚合计数 */
-  const handleFiles = async (files: FileList): Promise<void> => {
-    const images: File[] = Array.from(files).filter((f: File): boolean => f.type.startsWith('image/'));
-    if (images.length === 0) {
-      return;
-    }
-    setUploading(true);
-    let failed: number = 0;
-    let failMsg: string = '';
-    for (const raw of images) {
-      try {
-        const file: File = await compressImageFile(raw);
-        const result: UploadResult = await uploadMedia(settings.apiBaseUrl, settings.apiKey, file);
-        setAttaches((prev: MomentAttach[]): MomentAttach[] => [
-          ...prev,
-          { kind: 'image', id: newAttachId(), url: result.url, mediaId: result.media_id },
-        ]);
-      } catch (err: unknown) {
-        failed += 1;
-        failMsg = err instanceof ApiError ? err.message : '上传失败';
-      }
-    }
-    setUploading(false);
-    if (failed > 0) {
-      const summary: string = failed === images.length
-        ? failMsg
-        : `${images.length - failed}/${images.length} 张上传成功，${failed} 张失败：${failMsg}`;
-      setNotice({ kind: 'err', text: summary });
-    }
-  };
-
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>): void => {
     if (e.clipboardData.files.length > 0) {
       e.preventDefault();
-      void handleFiles(e.clipboardData.files);
+      void uploadToServer(e.clipboardData.files); // 粘贴为惯性操作，恒走服务器通道不打断
     }
   };
 
-  const onFileChange = (e: ChangeEvent<HTMLInputElement>): void => {
+  const onServerFileChange = (e: ChangeEvent<HTMLInputElement>): void => {
     if (e.target.files !== null) {
-      void handleFiles(e.target.files);
+      void uploadToServer(e.target.files);
     }
     e.target.value = ''; // 允许重复选择同一文件
+  };
+
+  const onTgFileChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    if (e.target.files !== null) {
+      void uploadToTg(e.target.files);
+    }
+    e.target.value = '';
+  };
+
+  /** 插入图片入口：TG图床可用先弹通道选择，否则直弹文件选择器（均在用户手势同步栈内） */
+  const handleImageToolClick = (): void => {
+    if (uploading) {
+      return;
+    }
+    if (tgBedReady) {
+      setSheet('image');
+    } else {
+      fileInputRef.current?.click();
+    }
   };
 
   /** 发布：校验 → 组装 HTML → posts.create(moment) */
@@ -132,8 +132,8 @@ export function MomentComposer(props: MomentComposerProps) {
         settings.apiKey,
         buildMomentHtml(trimmed, attaches),
         attaches
-          .filter((a: MomentAttach): boolean => a.kind === 'image')
-          .map((a: MomentAttach): number => (a.kind === 'image' ? a.mediaId : 0)),
+          .filter((a: MomentAttach): boolean => a.kind === 'image' && a.source === 'server')
+          .map((a: MomentAttach): number => (a.kind === 'image' ? (a.mediaId ?? 0) : 0)),
         visibility,
       );
       setContent('');
@@ -184,8 +184,8 @@ export function MomentComposer(props: MomentComposerProps) {
         </p>
       </div>
       <div className="mt-2 flex items-center gap-0.5">
-        <button type="button" title="插入图片（本地/粘贴）" disabled={uploading} className={TOOL_CLS}
-          onClick={(): void => fileInputRef.current?.click()}>
+        <button type="button" title={tgBedReady ? '插入图片（服务器 / TG图床）' : '插入图片（本地/粘贴）'} disabled={uploading} className={TOOL_CLS}
+          onClick={handleImageToolClick}>
           <MomentIcon kind="image" />
         </button>
         <button type="button" title="插入视频（B站/YouTube 链接）" className={TOOL_CLS}
@@ -206,7 +206,15 @@ export function MomentComposer(props: MomentComposerProps) {
           accept="image/*"
           multiple
           className="hidden"
-          onChange={onFileChange}
+          onChange={onServerFileChange}
+        />
+        <input
+          ref={tgFileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          multiple
+          className="hidden"
+          onChange={onTgFileChange}
         />
         <span className="flex-1" />
         <VisibilityToggle value={visibility} onChange={setVisibility} disabled={uploading || submitting} />
@@ -219,6 +227,17 @@ export function MomentComposer(props: MomentComposerProps) {
           {uploading ? '上传中…' : submitting ? '发布中…' : '发布'}
         </button>
       </div>
+      {sheet === 'image' && (
+        <ImageSheet onClose={(): void => setSheet(null)} onPick={(target: ImageUploadTarget): void => {
+          setSheet(null);
+          // 回调发生在弹层按钮点击手势的同步栈内，此处立即触发文件选择器合规
+          if (target === 'tg') {
+            tgFileInputRef.current?.click();
+          } else {
+            fileInputRef.current?.click();
+          }
+        }} />
+      )}
       {sheet === 'video' && (
         <VideoSheet onClose={(): void => setSheet(null)} onSubmit={(url: string): void => {
           const parsed: ParsedVideo | null = parseVideoUrl(url);

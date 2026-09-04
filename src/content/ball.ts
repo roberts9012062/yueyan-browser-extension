@@ -7,6 +7,8 @@
 //   - 单击球体展开/收起页面内嵌面板（iframe 加载插件自身页面 ?mode=embed）；
 //   - 鼠标悬停球体向下展开快捷菜单：⭐一键收藏（本地书签）/ 📝网页总结 / 📸网页截图，
 //     后两者写入 panel_action 并展开面板，由 embed 面板中的 AI 页执行（见 AiChatTab）；
+//   - 右键菜单任务（总结发布/收藏/发说说）经「yy-exec-offer」在球旁展开执行框
+//     （iframe 加载 ?mode=exec&nonce=…，桌宠观感：执行期间球体呼吸加速）；
 //   - 遵循设置中的 showBall 开关（chrome.storage.onChanged 实时显隐）。
 //
 // 安全约束（手册 §7）：只渲染悬浮球与面板 iframe，不读取宿主脚本数据；
@@ -242,6 +244,18 @@ const SHADOW_CSS: string = `
   @keyframes pop-in { from { opacity: 0; transform: scale(0.96) translateY(6px); } to { opacity: 1; transform: none; } }
   .panel-wrap iframe { width: 100%; height: 100%; border: none; }
 
+  /* 执行框（桌宠）：右键任务执行时在球旁展开的紧凑卡片（iframe 加载 ?mode=exec 面板页） */
+  .exec-wrap {
+    position: fixed; width: 320px; height: 430px; max-height: calc(100vh - 24px);
+    display: none; flex-direction: column; overflow: hidden;
+    border-radius: 14px; background: #121826;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); border: 1px solid rgba(42, 51, 72, 0.9);
+  }
+  .exec-wrap.open { display: flex; animation: pop-in 200ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .exec-wrap iframe { width: 100%; height: 100%; border: none; }
+  /* 桌宠忙碌态：执行期间月晕呼吸加速（工作观感），结束恢复 */
+  .ball.busy::before { animation-duration: 1.1s; }
+
   .toast {
     position: fixed; z-index: 2147483646; padding: 6px 14px; border-radius: 999px;
     background: rgba(18, 24, 38, 0.92); color: #e8ecf4; font-size: 12px;
@@ -322,6 +336,65 @@ function main(): void {
       setPanelOpen(false);
     },
     true,
+  );
+
+  // ---------- 执行框（桌宠）：右键任务的球旁执行卡片 ----------
+  // 由 background 的「yy-exec-offer」探测展开（iframe 加载 ?mode=exec&nonce=…），
+  // 执行器完成后经「yy-exec-close」收起；执行期间球体加 busy 类（呼吸加速）。
+  const execWrap: HTMLDivElement = document.createElement('div');
+  execWrap.className = 'exec-wrap';
+  rootBox.appendChild(execWrap);
+  let execFrame: HTMLIFrameElement | null = null;
+  let execOpen: boolean = false;
+
+  function setExecOpen(nonce: string | null): void {
+    if (nonce === null) {
+      execOpen = false;
+      execWrap.classList.remove('open');
+      ball.classList.remove('busy');
+      // 移除 iframe 而非仅隐藏：释放执行器页的后台实例（下次任务重新创建）
+      if (execFrame !== null) {
+        execFrame.remove();
+        execFrame = null;
+      }
+      return;
+    }
+    if (execFrame === null) {
+      execFrame = document.createElement('iframe');
+      execFrame.title = '月言助手执行框';
+      execWrap.appendChild(execFrame);
+    }
+    // 已有执行框时换目标 nonce 重新加载（新任务覆盖旧任务）
+    execFrame.src = `${chrome.runtime.getURL('src/sidepanel/index.html')}?mode=exec&nonce=${encodeURIComponent(nonce)}`;
+    execOpen = true;
+    execWrap.classList.add('open');
+    ball.classList.add('busy');
+  }
+
+  // 执行器（iframe 页）通知收起；background 探测球可用性（同步应答）
+  chrome.runtime.onMessage.addListener(
+    (msg: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response?: unknown) => void): boolean => {
+      const payload = msg as Record<string, unknown> | null;
+      if (typeof payload !== 'object' || payload === null) {
+        return false;
+      }
+      if (payload.type === 'yy-exec-offer') {
+        // 球隐藏（showBall=false）时谢绝，让 background 走面板兜底
+        const ok: boolean = host.style.display !== 'none';
+        const nonce: unknown = payload.nonce;
+        if (ok && typeof nonce === 'string' && nonce !== '') {
+          setExecOpen(nonce);
+        }
+        sendResponse({ ok });
+        return false;
+      }
+      if (payload.type === 'yy-exec-close') {
+        setExecOpen(null);
+        sendResponse({ ok: true });
+        return false;
+      }
+      return false;
+    },
   );
 
   // ---------- 悬停感应区（球与菜单的统一父级） ----------
@@ -503,7 +576,9 @@ function main(): void {
         addedAt: Date.now(),
         children: [],
       };
-      await chrome.storage.local.set({ [KEY_BOOKMARKS]: { roots: [node, ...roots] } });
+      // savedAt 与扩展侧书签双存调和机制同步（IndexedDB 主存 ⇄ chrome.storage 兜底，新者胜；
+      // content script 够不到扩展 IndexedDB，靠该时间戳保证收藏被收敛进主存）
+      await chrome.storage.local.set({ [KEY_BOOKMARKS]: { roots: [node, ...roots], savedAt: Date.now() } });
       showToast('已收藏');
     } catch {
       showToast('收藏失败');
@@ -569,6 +644,13 @@ function main(): void {
     panelWrap.style.left =
       openOnLeft ? `${Math.max(currentPos.x - panelWidth - 10, EDGE_GAP)}px` : `${Math.min(currentPos.x + BALL_SIZE + 10, window.innerWidth - panelWidth - EDGE_GAP)}px`;
     panelWrap.style.top = `${clampToViewport({ x: 0, y: currentPos.y }).y}px`;
+
+    // 执行框同款贴边策略（窄卡 320px；面板与执行框互不挤压，重叠时执行框在上层）
+    const execWidth: number = 320;
+    const execOnLeft: boolean = currentPos.x + BALL_SIZE + execWidth + EDGE_GAP > window.innerWidth;
+    execWrap.style.left =
+      execOnLeft ? `${Math.max(currentPos.x - execWidth - 10, EDGE_GAP)}px` : `${Math.min(currentPos.x + BALL_SIZE + 10, window.innerWidth - execWidth - EDGE_GAP)}px`;
+    execWrap.style.top = `${clampToViewport({ x: 0, y: currentPos.y }).y}px`;
   }
 
   void (async (): Promise<void> => {
@@ -591,6 +673,9 @@ function main(): void {
       closeFan();
       if (panelOpen) {
         setPanelOpen(false);
+      }
+      if (execOpen) {
+        setExecOpen(null);
       }
     }
   }

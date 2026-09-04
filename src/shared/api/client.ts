@@ -48,8 +48,8 @@ function describeNetworkError(baseUrl: string, aborted: boolean): string {
   return '无法连接站点：请检查站点地址是否正确、服务是否在线';
 }
 
-/** 开放网关请求描述（url 为以 /api/v1 开头的完整路径） */
-interface OpenRequestInit {
+/** 开放网关 / Worker 等请求描述（url 为以 / 或 http 开头的路径，与 baseUrl 直接拼接） */
+export interface OpenRequestInit {
   url: string;
   method: string;
   headers: Record<string, string>;
@@ -59,8 +59,9 @@ interface OpenRequestInit {
 /**
  * 带超时的 fetch 封装：超时 abort 与真实网络故障统一抛 ApiError（status=0），
  * 文案按 baseUrl 与 aborted 区分（超时曾被误报为「无法连接站点」）。
+ * 导出给非网关信封协议复用（如 CF 图床 Worker 直连）——超时与网络错误文案不重复实现。
  */
-async function fetchWithTimeout(baseUrl: string, init: OpenRequestInit, timeoutMs: number): Promise<Response> {
+export async function fetchWithTimeout(baseUrl: string, init: OpenRequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   let aborted: boolean = false;
   const timer = setTimeout((): void => {
@@ -88,6 +89,10 @@ async function unwrapEnvelope<T>(response: Response): Promise<T> {
   try {
     envelope = (await response.json()) as ApiEnvelope<T>;
   } catch {
+    // 纯文本 404 = 站点后端无此路由（接口比站点版本新），与一般网关错误页分开提示
+    if (response.status === 404) {
+      throw new ApiError('站点接口不存在（HTTP 404）：该功能需要较新的站点后端，请先升级部署站点后再试', 404);
+    }
     throw new ApiError(`站点返回异常（HTTP ${response.status}）`, response.status);
   }
   if (!response.ok || envelope.code !== 0) {
@@ -121,6 +126,32 @@ async function openRequest<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   }, timeoutMs);
   return unwrapEnvelope<T>(response);
+}
+
+/**
+ * 直通 JSON POST（非开放网关信封端点专用，如访客密码解锁 POST /nav/private/unlock——
+ * 响应为插件原生 JSON {token,...} 或 {error,code}，需保留 HTTP 状态码交调用方判定）。
+ * 网络级失败（断网/超时/混合内容拦截）仍统一抛 ApiError(status=0)。
+ */
+export async function rawPostJson(
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<{ status: number; data: unknown }> {
+  const response: Response = await fetchWithTimeout(baseUrl, {
+    url: path,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, timeoutMs);
+  let data: unknown = null;
+  try {
+    data = await response.json();
+  } catch {
+    // 非 JSON 响应体（如网关错误页）保留 null，调用方按状态码兜底提示
+  }
+  return { status: response.status, data };
 }
 
 /** GET 开放接口（timeoutMs：普通查询 15s） */

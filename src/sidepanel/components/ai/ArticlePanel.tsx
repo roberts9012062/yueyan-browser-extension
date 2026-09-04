@@ -2,6 +2,8 @@
 // 「AI 生成文章」面板：把 AI 回答润色为可发布的文章（HTML 富文本编辑），
 // AI 配图插入正文（媒体 ID 关联），标题/提示词由 AI 生成可改，SEO 可填，
 // 一键发布到 boke（开放网关 posts.create，凭 Key 绑定用户身份）。
+// 发布前正文图片按设置 publishImageBed 路由（站点服务器 / TG图床 / CF图床），
+// 路由实现在 publish-image-router.ts（本文件只消费其结果）。
 import { useEffect, useRef, useState } from 'react';
 import type { PluginSettings } from '../../../shared/types';
 import {
@@ -9,7 +11,6 @@ import {
   createPost,
   listAiModels,
   sendAiChatStream,
-  transferImage,
 } from '../../../shared/api/endpoints';
 import { ApiError } from '../../../shared/api/client';
 import { downloadAndCache } from '../../../shared/storage/image-cache';
@@ -18,6 +19,7 @@ import type { Visibility } from '../VisibilityToggle';
 import { renderMarkdown } from './MarkdownMessage';
 import { RichEditor } from './RichEditor';
 import type { RichEditorHandle } from './RichEditor';
+import { routeArticleImages } from './publish-image-router';
 
 interface ArticlePanelProps {
   /** 连接设置（站点与 Key） */
@@ -35,8 +37,8 @@ interface ArticlePanelProps {
   onClose: () => void;
 }
 
-/** AI 生成元信息（标题 + SEO；宽松解析容错） */
-interface ArticleMeta {
+/** AI 生成元信息（标题 + SEO + 标签；宽松解析容错） */
+export interface ArticleMeta {
   title: string;
   seoTitle: string;
   seoDescription: string;
@@ -49,7 +51,7 @@ interface ArticleMeta {
  * 三级容错：剥代码围栏 → 整体 JSON 解析 → 截断时逐字段正则提取；
  * 兜底标题跳过 ```json 等围栏/空行（此前会把围栏标记当标题）。
  */
-function parseMeta(raw: string): ArticleMeta {
+export function parseMeta(raw: string): ArticleMeta {
   const fenced: RegExpMatchArray | null = raw.match(/\{[\s\S]*\}/);
   if (fenced !== null) {
     try {
@@ -106,8 +108,63 @@ function parseMeta(raw: string): ArticleMeta {
   return { title: fallbackLine.slice(0, 40), seoTitle: '', seoDescription: '', tags: [] };
 }
 
-/** 原文图片均匀插入 markdown：按段落间隔分布（图多时每 N 段一张；无段则附文末；纯函数） */
-function distributeImages(markdown: string, images: readonly string[]): string {
+/** 元信息生成结果（model 回传供调用方展示） */
+export interface ArticleMetaGenResult {
+  meta: ArticleMeta;
+  model: string;
+}
+
+/**
+ * AI 生成文章元信息（标题/SEO/标签；流式聚合防 think 截断，见 genMeta 沿革）。
+ * 模型为空时自动取站点第一个可用模型；失败/无模型返回 null（调用方留空可手填）。
+ * 导出供右键「总结本页」执行器复用——元信息体验与「生成文章」完全一致。
+ */
+export async function generateArticleMeta(
+  baseUrl: string,
+  apiKey: string,
+  fallbackModel: string,
+  sourceMarkdown: string,
+): Promise<ArticleMetaGenResult | null> {
+  let model: string = fallbackModel;
+  if (model === '') {
+    const providers = await listAiModels(baseUrl, apiKey);
+    model = providers[0]?.models[0] ?? '';
+  }
+  if (model === '') {
+    return null;
+  }
+  let aggregated: string = '';
+  await sendAiChatStream(
+    baseUrl,
+    apiKey,
+    model,
+    [
+      { role: 'system', content: '你是博客编辑。只输出 JSON，不要任何其他文字。' },
+      {
+        role: 'user',
+        content:
+          '为下面的内容生成文章标题、SEO 信息与标签，输出严格 JSON：' +
+          '{"title":"12-24字中文标题","seo_title":"SEO标题","seo_description":"80-120字摘要","tags":["标签1","标签2"]}' +
+          '（tags 为 3-5 个核心关键词，不带 # 号）\n\n内容：' +
+          sourceMarkdown.slice(0, 2000),
+      },
+    ],
+    2000,
+    false,
+    { onText: (delta: string): void => { aggregated += delta; } },
+  );
+  const parsed: ArticleMeta = parseMeta(aggregated);
+  if (parsed.title.trim() === '') {
+    return null;
+  }
+  return { meta: parsed, model };
+}
+
+/**
+ * 原文图片均匀插入 markdown：按段落间隔分布（图多时每 N 段一张；无段则附文末；纯函数）。
+ * 导出供右键「总结本页」执行器复用（SummaryExec 同款插图规则，两处一起改）。
+ */
+export function distributeImages(markdown: string, images: readonly string[]): string {
   if (images.length === 0) {
     return markdown;
   }
@@ -155,49 +212,16 @@ export function ArticlePanel(props: ArticlePanelProps): React.ReactNode {
 
       // ① 元信息（标题/标签/SEO）先行——生成快，先就位便于用户查看；
       //    失败自动重试一次（长字幕输入偶发超时），仍失败则留空提示手填
+      //    （生成本体在 generateArticleMeta，与右键「总结本页」执行器共用）
       const genMeta = async (): Promise<boolean> => {
-        let usableModel: string = props.model;
-        if (usableModel === '') {
-          const providers = await listAiModels(props.settings.apiBaseUrl, props.settings.apiKey);
-          usableModel = providers[0]?.models[0] ?? '';
-          setModel(usableModel);
-        }
-        if (usableModel === '') {
+        const gen = await generateArticleMeta(props.settings.apiBaseUrl, props.settings.apiKey, props.model, props.sourceMarkdown);
+        if (gen === null) {
           return false;
         }
-        // 走流式端点聚合（后端 ThinkFilter 剥离推理模型的思考段，
-        // 非流式会把 <think> 计入输出导致 800 token 内 JSON 被截断）
-        let aggregated: string = '';
-        await sendAiChatStream(
-          props.settings.apiBaseUrl,
-          props.settings.apiKey,
-          usableModel,
-          [
-            { role: 'system', content: '你是博客编辑。只输出 JSON，不要任何其他文字。' },
-            {
-              role: 'user',
-              content:
-                '为下面的内容生成文章标题、SEO 信息与标签，输出严格 JSON：' +
-                '{"title":"12-24字中文标题","seo_title":"SEO标题","seo_description":"80-120字摘要","tags":["标签1","标签2"]}' +
-                '（tags 为 3-5 个核心关键词，不带 # 号）\n\n内容：' +
-                props.sourceMarkdown.slice(0, 2000),
-            },
-          ],
-          2000,
-          false,
-          {
-            onText: (delta: string): void => {
-              aggregated += delta;
-            },
-          },
-        );
-        const parsed: ArticleMeta = parseMeta(aggregated);
-        if (parsed.title.trim() === '') {
-          return false;
-        }
-        setMeta(parsed);
-        if (parsed.tags.length > 0) {
-          setTags(parsed.tags.join(', '));
+        setModel(gen.model);
+        setMeta(gen.meta);
+        if (gen.meta.tags.length > 0) {
+          setTags(gen.meta.tags.join(', '));
         }
         return true;
       };
@@ -274,7 +298,8 @@ export function ArticlePanel(props: ArticlePanelProps): React.ReactNode {
       editorRef.current?.insertHtml(
         `<figure><img src="${absolute}" alt="AI 配图" style="width:100%;border-radius:8px;margin:8px 0" /></figure>`,
       );
-      if (typeof result.media_id === 'number') {
+      // 图床通道（tg/cf）发布时正文图片统一转图床、不关联站点媒体库，故此处不收集 media_id
+      if (props.settings.publishImageBed === 'none' && typeof result.media_id === 'number') {
         const mediaId: number = result.media_id;
         setMediaIds((prev: number[]): number[] => [...prev, mediaId]);
       }
@@ -282,60 +307,6 @@ export function ArticlePanel(props: ArticlePanelProps): React.ReactNode {
     } catch (err: unknown) {
       setError(err instanceof ApiError ? err.message : '配图失败，请稍后重试');
     }
-  }
-
-  /**
-   * 发布前转存外链图片：编辑器中指向其它站点的 <img> 逐张调 media.transfer，
-   * src 替换为本站持久地址、media_id 并入关联列表；单张失败（防盗链/非图片）
-   * 保留原址继续，仅计数提示——不阻断发布。
-   * 返回：{html 转存后的正文, mediaIds 含新转存的 ID, failed 失败张数}
-   */
-  async function transferExternalImages(
-    sourceHtml: string,
-  ): Promise<{ html: string; mediaIds: number[]; failed: number }> {
-    const doc: Document = new DOMParser().parseFromString(sourceHtml, 'text/html');
-    const imgs: HTMLImageElement[] = Array.from(doc.querySelectorAll('img'));
-    const siteHost: string = (() => {
-      try {
-        return new URL(props.settings.apiBaseUrl).host;
-      } catch {
-        return '';
-      }
-    })();
-
-    const collected: number[] = [];
-    let failed: number = 0;
-    let index: number = 0;
-    for (const img of imgs) {
-      const src: string = img.getAttribute('src') ?? '';
-      index += 1;
-      if (!/^https?:\/\//i.test(src)) {
-        continue;
-      }
-      // 本站地址（AI 配图已转存过）跳过
-      let host: string = '';
-      try {
-        host = new URL(src).host;
-      } catch {
-        continue;
-      }
-      if (host === siteHost) {
-        continue;
-      }
-      setNotice(`正在转存外链图片 ${index}/${imgs.length}…`);
-      try {
-        const result = await transferImage(props.settings.apiBaseUrl, props.settings.apiKey, src);
-        if (result.url !== '') {
-          img.setAttribute('src', result.url);
-        }
-        if (typeof result.media_id === 'number') {
-          collected.push(result.media_id);
-        }
-      } catch {
-        failed += 1;
-      }
-    }
-    return { html: doc.body.innerHTML, mediaIds: collected, failed };
   }
 
   // ---------- 发布 ----------
@@ -353,10 +324,12 @@ export function ArticlePanel(props: ArticlePanelProps): React.ReactNode {
     setError('');
     setNotice('正在处理正文图片…');
 
-    // 外链图转存（防盗链根治）：失败张数仅提示
-    const transferred = await transferExternalImages(html);
-    if (transferred.failed > 0) {
-      setError(`${transferred.failed} 张外链图片转存失败（源站拒绝），已保留原地址，发布后如裂图可编辑替换`);
+    // 图片路由（按设置：站点服务器转存 / TG图床 / CF图床直传）；失败张数仅提示
+    const routed = await routeArticleImages(html, props.settings, setNotice);
+    if (routed.failed > 0) {
+      setError(
+        `${routed.failed} 张图片处理失败（${routed.failMsg}），已保留原地址，发布后如裂图可编辑替换`,
+      );
     }
     try {
       const tagList: string[] = tags
@@ -368,12 +341,13 @@ export function ArticlePanel(props: ArticlePanelProps): React.ReactNode {
         meta.seoTitle !== '' || meta.seoDescription !== ''
           ? { seo_title: meta.seoTitle, seo_description: meta.seoDescription }
           : undefined;
-      const allMediaIds: number[] = [...mediaIds, ...transferred.mediaIds];
-      setNotice(transferred.failed > 0 ? '部分图片转存失败，继续发布…' : '正在发布…');
+      // 图床通道 routed.mediaIds 为空（图床文件不关联站点媒体库），AI 配图亦不收集
+      const allMediaIds: number[] = [...mediaIds, ...routed.mediaIds];
+      setNotice(routed.failed > 0 ? '部分图片处理失败，继续发布…' : '正在发布…');
       await createPost(props.settings.apiBaseUrl, props.settings.apiKey, {
         post_kind: 'article',
         title,
-        content: transferred.html,
+        content: routed.html,
         content_format: 'html',
         tags: tagList,
         media_ids: allMediaIds,

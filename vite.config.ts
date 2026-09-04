@@ -17,7 +17,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
     // 产物输出到仓库 dist/browser-extension/（加载目录）
-    outDir: resolve(EXTENSION_ROOT, '../dist/browser-extension'),
+    // 输出目录默认主仓布局（仓库根 dist/）；开源仓 CI 以 EXT_OUT_DIR 覆盖（如 ./dist）
+    outDir: process.env.EXT_OUT_DIR ?? resolve(EXTENSION_ROOT, '../dist/browser-extension'),
     emptyOutDir: true,
     sourcemap: false,
     target: 'chrome110',

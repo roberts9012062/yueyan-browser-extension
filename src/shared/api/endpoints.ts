@@ -2,13 +2,16 @@
 // 开放接口调用函数集合（每端点一个薄封装，参数显式、返回强类型）。
 // 接口清单见主站 internal/model/openapi.go OpenAPICatalog()。
 
-import { ApiError, buildQuery, openGet, openPost, openUpload } from './client';
+import { ApiError, buildQuery, openGet, openPost, openUpload, rawPostJson } from './client';
 import type {
   AiChatResult,
   AiProvider,
   AiSearchSource,
   ChatMessage,
   SiteMeta,
+  SiteNavLink,
+  SiteNavLinksResult,
+  SiteNavPrivateConfig,
   TimelineResult,
   UploadResult,
   UserProfile,
@@ -16,6 +19,9 @@ import type {
 
 /** 后端 API 版本前缀 */
 const API_PREFIX = '/api/v1';
+
+/** 密码解锁校验超时（毫秒；与开放接口普通查询一致） */
+const UNLOCK_TIMEOUT_MS: number = 15000;
 
 /** 站点信息（site.meta）：连通性校验 + 站名/描述展示 */
 export async function getSiteMeta(baseUrl: string, apiKey: string): Promise<SiteMeta> {
@@ -196,6 +202,62 @@ export async function createMomentPost(
 /** 媒体上传（media.upload：multipart 文件落站点媒体库，写说说的本地图/粘贴图通道） */
 export async function uploadMedia(baseUrl: string, apiKey: string, file: File): Promise<UploadResult> {
   return openUpload<UploadResult>(baseUrl, apiKey, `${API_PREFIX}/open/media`, file, 60000);
+}
+
+/** 站点导航列表（navlinks.list：精品导航插件数据，书签「导入站点导航」数据源） */
+export async function listSiteNavLinks(baseUrl: string, apiKey: string): Promise<SiteNavLinksResult> {
+  return openGet<SiteNavLinksResult>(baseUrl, apiKey, `${API_PREFIX}/open/nav/links`);
+}
+
+/** 导航同步写入结果（navlinks.save 响应 data） */
+export interface NavSaveResult {
+  created: number;
+  skipped: number;
+  failed: number;
+}
+
+/** 导航同步写入（navlinks.save：批量写入精品导航；URL 已存在自动跳过，单次 ≤500 条） */
+export async function saveNavLinks(baseUrl: string, apiKey: string, links: SiteNavLink[]): Promise<NavSaveResult> {
+  return openPost<NavSaveResult>(baseUrl, apiKey, `${API_PREFIX}/open/nav/links`, { links }, 120000);
+}
+
+/** 私有导航条目数据（navlinks.private.list：响应与 navlinks.list 同构，仅含私有条目） */
+export async function listPrivateNavLinks(baseUrl: string, apiKey: string): Promise<SiteNavLinksResult> {
+  return openGet<SiteNavLinksResult>(baseUrl, apiKey, `${API_PREFIX}/open/nav/private/links`);
+}
+
+/** 私有导航访问配置（navlinks.private.config：mode/是否已设密码/标题/条数，无密钥材料） */
+export async function getPrivateNavConfig(baseUrl: string, apiKey: string): Promise<SiteNavPrivateConfig> {
+  return openGet<SiteNavPrivateConfig>(baseUrl, apiKey, `${API_PREFIX}/open/nav/private/config`);
+}
+
+/**
+ * 校验私有导航访问密码（公开桥接 POST /nav/private/unlock，无需 Key；响应为直通 JSON 非信封）。
+ * 返回归一判定：'ok'=密码正确 / 'bad_password'=密码不对 / 'self_only'=站点未开启密码访问 / 'unavailable'=站点不可达。
+ */
+export async function unlockPrivateNav(
+  baseUrl: string,
+  password: string,
+): Promise<'ok' | 'bad_password' | 'self_only' | 'unavailable'> {
+  const { status, data } = await rawPostJson(
+    baseUrl,
+    `${API_PREFIX}/nav/private/unlock`,
+    { password },
+    UNLOCK_TIMEOUT_MS,
+  );
+  if (status === 200) {
+    return 'ok';
+  }
+  const code: string = typeof data === 'object' && data !== null && typeof (data as Record<string, unknown>).code === 'string'
+    ? (data as Record<string, unknown>).code as string
+    : '';
+  if (status === 401) {
+    return 'bad_password';
+  }
+  if (status === 403 && code === 'self_only') {
+    return 'self_only';
+  }
+  return 'unavailable';
 }
 
 /** 图片转存结果（POST /open/media/transfer 响应 data） */

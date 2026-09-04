@@ -15,7 +15,7 @@ import {
   saveCachedSiteMeta,
   saveSettings,
 } from '../shared/storage/settings';
-import type { PanelTab, PluginSettings, SiteMeta, UserProfile } from '../shared/types';
+import type { ImageBedConfig, PanelTab, PluginSettings, SiteMeta, UserProfile } from '../shared/types';
 import {
   readCurrentMode,
   switchToDock,
@@ -24,11 +24,13 @@ import {
 import type { PanelMode } from '../shared/panel-mode';
 import { HeaderBar } from './components/HeaderBar';
 import { WelcomeView } from './components/WelcomeView';
-import { ManagePanel } from './components/ManagePanel';
+import { AiConnectGuide } from './components/AiConnectGuide';
+import { SettingsPanel } from './components/SettingsPanel';
 import { HomeTab } from './components/HomeTab';
 import { AiChatTab } from './components/ai/AiChatTab';
 import { BookmarksTab } from './components/bookmarks/BookmarksTab';
 import { MomentComposer } from './components/moment/MomentComposer';
+import { ExecutorOverlay } from './components/exec/ExecutorOverlay';
 
 /** 连接阶段 */
 type Phase = 'loading' | 'welcome' | 'ready';
@@ -46,7 +48,7 @@ export function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [meta, setMeta] = useState<SiteMeta | null>(null);
   const [tab, setTab] = useState<PanelTab>('home');
-  const [manageOpen, setManageOpen] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
 
   // 面板形态（dock=右侧栏 / float=悬浮窗 / embed=网页内嵌）
   const [mode] = useState<PanelMode>((): PanelMode => readCurrentMode());
@@ -106,10 +108,9 @@ export function App() {
       ]);
 
       const next: PluginSettings = {
+        ...settings,
         apiBaseUrl: baseUrl,
         apiKey: key,
-        theme: settings.theme,
-        showBall: settings.showBall,
       };
       await saveSettings(next);
       void saveCachedProfile(me).catch(() => undefined);
@@ -118,7 +119,7 @@ export function App() {
       setSettings(next);
       setProfile(me);
       setMeta(siteMeta);
-      setManageOpen(false);
+      setSettingsOpen(false);
       setTab('home');
       setRefreshTick((n: number) => n + 1);
       setPhase('ready');
@@ -137,7 +138,7 @@ export function App() {
     setSettings(next);
     setProfile(null);
     setConnectError('');
-    setManageOpen(false);
+    setSettingsOpen(false);
     setPhase('welcome');
   }
 
@@ -164,6 +165,25 @@ export function App() {
   // ---------- 球形悬浮开关 ----------
   async function toggleBall(show: boolean): Promise<void> {
     const next: PluginSettings = { ...settings, showBall: show };
+    setSettings(next);
+    await saveSettings(next);
+  }
+
+  // ---------- 站点导航自动同步开关（设置面板「通用」区） ----------
+  async function toggleAutoSyncNav(on: boolean): Promise<void> {
+    const next: PluginSettings = { ...settings, autoSyncNav: on };
+    setSettings(next);
+    await saveSettings(next);
+  }
+
+  // ---------- 发布图床配置（设置面板「发布图床」区：单选与 CF 凭证统一走此持久化） ----------
+  async function saveImageBed(config: ImageBedConfig): Promise<void> {
+    const next: PluginSettings = {
+      ...settings,
+      publishImageBed: config.bed,
+      cfBedUrl: config.cfUrl,
+      cfBedKey: config.cfKey,
+    };
     setSettings(next);
     await saveSettings(next);
   }
@@ -200,21 +220,9 @@ export function App() {
     );
   }
 
-  // ---------- 未连接 ----------
-  if (phase === 'welcome') {
-    return (
-      <div className="relative h-full">
-        <WelcomeView
-          initialUrl={settings.apiBaseUrl}
-          submitting={submitting}
-          error={connectError}
-          onSubmit={(url: string, key: string) => void handleConnect(url, key)}
-        />
-      </div>
-    );
-  }
+  // ---------- 未连接也渲染完整骨架：书签夹可用（仅本地能力），首页/AI 引导先连接 ----------
+  const connected: boolean = phase === 'ready';
 
-  // ---------- 已连接 ----------
   return (
     <div className="flex h-full flex-col">
       <HeaderBar
@@ -225,9 +233,9 @@ export function App() {
         showShapeButtons={mode !== 'embed'}
         onSetShape={(shape: 'float' | 'dock'): void => void handleSetShape(shape)}
         onToggleBall={(): void => void toggleBall(!settings.showBall)}
-        onOpenManage={(): void => {
+        onOpenSettings={(): void => {
           setConnectError('');
-          setManageOpen(true);
+          setSettingsOpen(true);
         }}
         onRefresh={(): void => void handleRefresh()}
         onToggleTheme={(): void => void toggleTheme()}
@@ -254,7 +262,17 @@ export function App() {
 
       {/* 内容区 */}
       <main className="thin-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {tab === 'home' && (
+        {tab === 'home' && !connected && (
+          <div className="-mx-4 -my-4 h-[calc(100%+2rem)]">
+            <WelcomeView
+              initialUrl={settings.apiBaseUrl}
+              submitting={submitting}
+              error={connectError}
+              onSubmit={(url: string, key: string) => void handleConnect(url, key)}
+            />
+          </div>
+        )}
+        {tab === 'home' && connected && (
           <HomeTab
             meta={meta}
             profile={profile}
@@ -266,23 +284,31 @@ export function App() {
         {tab === 'bookmark' && (
           <div className="-mx-4 -my-4 h-[calc(100%+2rem)]">
             <div className="relative flex h-full flex-col overflow-hidden">
-              <BookmarksTab />
+              <BookmarksTab connected={connected} />
             </div>
           </div>
         )}
-        {tab === 'ai' && (
+        {tab === 'ai' && !connected && (
+          <AiConnectGuide
+            onOpenSettings={(): void => {
+              setConnectError('');
+              setSettingsOpen(true);
+            }}
+          />
+        )}
+        {tab === 'ai' && connected && (
           <div className="-mx-4 -my-4 h-[calc(100%+2rem)]">
             <AiChatTab settings={settings} seedText="" onConsumeSeed={(): undefined => undefined} onRequestGoAi={(): void => setTab('ai')} />
           </div>
         )}
       </main>
 
-      {/* 底部写说说（仅首页展示；AI 页自带输入框，书签页需要完整空间） */}
-      {tab === 'home' && <MomentComposer settings={settings} />}
+      {/* 底部写说说（已连接的首页展示；AI 页自带输入框，书签页需要完整空间） */}
+      {tab === 'home' && connected && <MomentComposer settings={settings} />}
 
-      {/* 连接管理弹层 */}
-      {manageOpen && (
-        <ManagePanel
+      {/* 设置面板 */}
+      {settingsOpen && (
+        <SettingsPanel
           settings={settings}
           profile={profile}
           submitting={submitting}
@@ -290,9 +316,14 @@ export function App() {
           onSubmit={(url: string, key: string) => void handleConnect(url, key)}
           onDisconnect={(): void => void handleDisconnect()}
           onToggleBall={(show: boolean): void => void toggleBall(show)}
-          onClose={(): void => setManageOpen(false)}
+          onToggleAutoSync={(on: boolean): void => void toggleAutoSyncNav(on)}
+          onSaveImageBed={(config: ImageBedConfig): void => void saveImageBed(config)}
+          onClose={(): void => setSettingsOpen(false)}
         />
       )}
+
+      {/* 右键任务兜底执行卡（悬浮球不可用时 background 指派 target=panel，此处领取展示） */}
+      <ExecutorOverlay settings={settings} />
     </div>
   );
 }

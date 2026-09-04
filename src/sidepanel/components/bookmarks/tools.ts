@@ -78,6 +78,13 @@ export function collectAllIds(nodes: readonly BookmarkNode[]): string[] {
   return out;
 }
 
+/** 收集最近一次有效性检测判定为异常（fail）的链接节点（纯函数；未检测过的节点不算异常） */
+export function collectDeadLinks(nodes: readonly BookmarkNode[]): BookmarkNode[] {
+  return collectLinks(nodes).filter(
+    (n: BookmarkNode): boolean => n.check !== undefined && n.check.status === 'fail',
+  );
+}
+
 /** 判定 targetId 是否位于 subtreeId 子树内（含自身；用于拖拽防环守卫；纯函数） */
 export function isInSubtree(
   nodes: readonly BookmarkNode[],
@@ -107,16 +114,24 @@ export function isInSubtree(
 }
 
 /**
- * 从树中移除指定节点（不可变：返回新森林）。
+ * 从树中批量剪除一组节点 ID（不可变：返回新森林；被剪文件夹整棵带走其子级）。
+ * 编辑模式多选删除、查重清理、失效书签清理共用此剪枝路径。
  */
-export function removeNodeById(roots: readonly BookmarkNode[], id: string): BookmarkNode[] {
+export function removeIds(roots: readonly BookmarkNode[], ids: ReadonlySet<string>): BookmarkNode[] {
   const walk = (layer: readonly BookmarkNode[]): BookmarkNode[] =>
     layer
-      .filter((n: BookmarkNode): boolean => n.id !== id)
+      .filter((n: BookmarkNode): boolean => !ids.has(n.id))
       .map((n: BookmarkNode): BookmarkNode =>
         n.kind === 'folder' ? { ...n, children: walk(n.children) } : n,
       );
   return walk(roots);
+}
+
+/**
+ * 从树中移除单个指定节点（不可变：返回新森林）。
+ */
+export function removeNodeById(roots: readonly BookmarkNode[], id: string): BookmarkNode[] {
+  return removeIds(roots, new Set<string>([id]));
 }
 
 /** 查重：按归一化 URL 分组且仅保留 ≥2 条的组（组内按加入时间升序；基于先序全量链接） */

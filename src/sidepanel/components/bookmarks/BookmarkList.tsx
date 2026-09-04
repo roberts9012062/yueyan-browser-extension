@@ -7,7 +7,7 @@ import type { BookmarkNode, BookmarkTree } from '../../../shared/types';
 import {
   readCollapsedBookmarkIds,
   saveCollapsedBookmarkIds,
-} from '../../../shared/storage/settings';
+} from '../../../shared/storage/bookmark-store';
 import {
   getFaviconUrl,
   isInSubtree,
@@ -32,9 +32,12 @@ interface BookmarkListProps {
   onReorder: (nextRoots: BookmarkNode[]) => void;
 }
 
-/** 站点小图标：_favicon 缓存优先，加载失败回退默认图标 */
-function Favicon({ url }: { url: string }) {
+/** 站点小图标：自定义 icon（站点导航导入的 dataURL）优先，回退 _favicon 缓存，再回退默认图标 */
+function Favicon(props: { url: string; icon?: string }) {
   const [failed, setFailed] = useState<boolean>(false);
+  if (props.icon !== undefined && props.icon !== '') {
+    return <img src={props.icon} alt="" className="size-4 shrink-0 rounded-sm" />;
+  }
   if (failed) {
     return (
       <span className="flex size-4 shrink-0 items-center justify-center rounded-sm bg-muted text-[9px]" aria-hidden>
@@ -43,7 +46,7 @@ function Favicon({ url }: { url: string }) {
     );
   }
   return (
-    <img src={getFaviconUrl(url)} alt="" onError={(): void => setFailed(true)} className="size-4 shrink-0 rounded-sm" />
+    <img src={getFaviconUrl(props.url)} alt="" onError={(): void => setFailed(true)} className="size-4 shrink-0 rounded-sm" />
   );
 }
 
@@ -124,7 +127,7 @@ function NodeRow(props: TreeProps & { node: BookmarkNode; depth: number }) {
           </button>
         ) : (
           <>
-            <Favicon url={node.url} />
+            <Favicon url={node.url} icon={node.icon} />
             <button
               type="button"
               onClick={(): void => props.onOpen(node)}

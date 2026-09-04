@@ -6,10 +6,12 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 
+import type { ImageUploadTarget } from '../../../shared/types';
 import { parseMusicUrl, parseVideoUrl } from './compose';
 
-/** 弹层通用骨架：fixed 全视口覆盖（面板任意高度下均正确）、遮罩/关闭按钮/Esc 三种方式关闭 */
-function SheetShell(props: {
+/** 弹层通用骨架：fixed 全视口覆盖（面板任意高度下均正确）、遮罩/关闭按钮/Esc 三种方式关闭。
+ *  导出供书签「AI 添加站点」等高表单弹层复用（内容超高时内部滚动）。 */
+export function SheetShell(props: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
@@ -33,7 +35,7 @@ function SheetShell(props: {
         className="absolute inset-0 bg-black/40"
         onClick={onClose}
       />
-      <section className="relative w-full rounded-t-2xl border-t border-line bg-bg px-4 pb-5 pt-3 shadow-[var(--yy-shadow-card-hover)]">
+      <section className="relative max-h-[88vh] w-full overflow-y-auto thin-scroll rounded-t-2xl border-t border-line bg-bg px-4 pb-5 pt-3 shadow-[var(--yy-shadow-card-hover)]">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-medium text-ink">{props.title}</h3>
           <button
@@ -57,6 +59,36 @@ function SheetShell(props: {
 /** 弹层内输入行（URL / 文案共用样式） */
 const INPUT_CLS: string =
   'w-full rounded-xl border border-line bg-elevated px-3 py-2 text-xs text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none';
+
+/** 图片通道选项按钮统一样式（整行可点，图标 + 主标题 + 副说明） */
+const IMAGE_OPTION_CLS: string =
+  'flex w-full items-center gap-3 rounded-xl border border-line bg-elevated px-3 py-2.5 text-left transition-colors duration-200 hover:border-accent hover:bg-muted';
+
+/** 图片通道弹层：TG图床可用时点击「插入图片」先弹出，由用户选上传到站点服务器或 TG 图床。
+ *  两选项均在本弹层按钮的点击手势内同步回调（上层随即触发文件选择器——浏览器要求
+ *  fileInput.click() 处于用户激活的同步调用栈，弹层不得异步中转）。 */
+export function ImageSheet(props: { onClose: () => void; onPick: (target: ImageUploadTarget) => void }) {
+  return (
+    <SheetShell title="插入图片" onClose={props.onClose}>
+      <div className="flex flex-col gap-2">
+        <button type="button" className={IMAGE_OPTION_CLS} onClick={(): void => props.onPick('server')}>
+          <span aria-hidden className="text-base">🗄️</span>
+          <span className="flex flex-col">
+            <span className="text-xs font-medium text-ink">上传到服务器</span>
+            <span className="text-[11px] text-ink-3">存站点媒体库，大图自动压缩</span>
+          </span>
+        </button>
+        <button type="button" className={IMAGE_OPTION_CLS} onClick={(): void => props.onPick('tg')}>
+          <span aria-hidden className="text-base">✈️</span>
+          <span className="flex flex-col">
+            <span className="text-xs font-medium text-ink">上传到 TG 图床</span>
+            <span className="text-[11px] text-ink-3">经 TG图床插件直传原图，不压缩保真（≤ 20MB）</span>
+          </span>
+        </button>
+      </div>
+    </SheetShell>
+  );
+}
 
 /** 视频弹层：贴 B站 / YouTube 链接，前端解析失败内联报错 */
 export function VideoSheet(props: { onClose: () => void; onSubmit: (url: string) => void }) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "月言博客助手",
-  "version": "0.27.0",
+  "version": "0.35.0",
   "minimum_chrome_version": "110",
   "description": "月言博客平台的浏览器侧边栏助手：站点动态、AI 问答与开放接口中心，凭站点 URL + API Key 连接使用。",
   "icons": {
@@ -54,6 +54,7 @@
   "permissions": [
     "storage",
     "sidePanel",
+    "contextMenus",
     "bookmarks",
     "favicon",
     "tabs",

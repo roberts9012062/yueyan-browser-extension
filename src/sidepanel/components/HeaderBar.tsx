@@ -1,6 +1,6 @@
 // browser-extension/src/sidepanel/components/HeaderBar.tsx
-// 顶栏：左上角站点头像（点击弹出连接管理）+ 用户名与在线状态；
-// 右侧开关组：网页悬浮球开关 / 悬浮窗形态 / 侧边栏形态 / 刷新 / 主题切换 / 设置。
+// 顶栏：左上角站点头像（点击打开设置）+ 用户名与在线状态；
+// 右侧开关组：网页悬浮球开关 / 悬浮窗形态 / 侧边栏形态 / 刷新 / 主题切换 / 设置（齿轮）。
 import { useEffect, useState } from 'react';
 import type { PanelMode } from '../../shared/panel-mode';
 import type { PluginSettings, SiteMeta, UserProfile } from '../../shared/types';
@@ -20,8 +20,8 @@ interface HeaderBarProps {
   onSetShape: (shape: 'float' | 'dock') => void;
   /** 翻转网页悬浮球显示 */
   onToggleBall: () => void;
-  /** 头像 / 设置按钮点击 → 打开连接管理 */
-  onOpenManage: () => void;
+  /** 头像 / 齿轮按钮点击 → 打开设置面板 */
+  onOpenSettings: () => void;
   /** 刷新数据 */
   onRefresh: () => void;
   /** 切换深浅主题 */
@@ -66,6 +66,16 @@ function BallIcon(): React.ReactNode {
   );
 }
 
+/** 「设置」图标：齿轮（外圈齿 + 中轴） */
+function GearIcon(): React.ReactNode {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 1.8v1.9M8 12.3v1.9M1.8 8h1.9M12.3 8h1.9M3.5 3.5l1.35 1.35M11.15 11.15l1.35 1.35M12.5 3.5l-1.35 1.35M4.85 11.15 3.5 12.5" />
+    </svg>
+  );
+}
+
 export function HeaderBar(props: HeaderBarProps) {
   // 在线状态：实时跟随浏览器联网情况（用户名旁小圆点）
   const [online, setOnline] = useState<boolean>(navigator.onLine);
@@ -85,11 +95,11 @@ export function HeaderBar(props: HeaderBarProps) {
 
   return (
     <header className="flex items-center justify-between gap-2 border-b border-line px-3 py-2.5">
-      {/* 左侧：头像 + 身份 */}
+      {/* 左侧：头像 + 身份（点击打开设置） */}
       <button
         type="button"
-        onClick={props.onOpenManage}
-        title="管理站点连接"
+        onClick={props.onOpenSettings}
+        title="打开设置"
         className="group flex min-w-0 items-center gap-2.5 rounded-xl px-1 py-0.5 transition-colors duration-200 hover:bg-muted"
       >
         {avatarUrl !== '' ? (
@@ -159,8 +169,8 @@ export function HeaderBar(props: HeaderBarProps) {
         >
           🌓
         </button>
-        <button type="button" onClick={props.onOpenManage} title="连接设置" className={ICON_BTN_CLASS}>
-          ⚙
+        <button type="button" onClick={props.onOpenSettings} title="设置" className={ICON_BTN_CLASS} aria-label="设置">
+          <GearIcon />
         </button>
       </nav>
     </header>

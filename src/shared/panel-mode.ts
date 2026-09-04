@@ -13,8 +13,8 @@ export const PANEL_PATH: string = 'src/sidepanel/index.html';
 /** 页内停靠切换消息类型（手工同步：background/main.ts、src/content/dock.ts） */
 const DOCK_TOGGLE_MSG: string = 'yy-dock-toggle';
 
-/** 面板形态（embed=网页内球形悬浮展开的面板 iframe） */
-export type PanelMode = 'dock' | 'float' | 'embed';
+/** 面板形态（embed=网页内球形悬浮展开的面板 iframe；exec=悬浮球旁执行框 iframe 的独占视图） */
+export type PanelMode = 'dock' | 'float' | 'embed' | 'exec';
 
 /** 悬浮窗尺寸（与手册 §11 约定的面板观感一致） */
 export const FLOAT_WINDOW_WIDTH: number = 420;
@@ -28,6 +28,9 @@ export function readCurrentMode(): PanelMode {
   }
   if (param === 'embed') {
     return 'embed';
+  }
+  if (param === 'exec') {
+    return 'exec';
   }
   return 'dock';
 }
