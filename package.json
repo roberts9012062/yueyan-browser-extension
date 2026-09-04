@@ -5,7 +5,7 @@
   "type": "module",
   "description": "月言博客平台浏览器插件（Chrome / Edge，Manifest V3 侧边栏助手）",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build --outDir dist",
     "dev": "vite build --watch"
   },
   "dependencies": {

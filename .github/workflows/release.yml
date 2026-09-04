@@ -1,0 +1,50 @@
+# 发布构建：tag（v*）推送或手动触发 → 类型检查 → vite 构建 → 打包 zip → 附到 GitHub Release
+name: Release Build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript 严格类型检查
+        run: npx tsc --noEmit
+
+      - name: Build（产物输出 dist/，加载目录即 dist/）
+        run: npx vite build
+        env:
+          EXT_OUT_DIR: dist
+
+      - name: Pack zip
+        run: |
+          VER="${GITHUB_REF_NAME:-manual}"
+          cd dist
+          zip -r "../yueyan-browser-extension-${VER}.zip" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yueyan-browser-extension
+          path: yueyan-browser-extension-*.zip
+
+      - name: Attach to Release（仅 tag 触发）
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: yueyan-browser-extension-*.zip
+          generate_release_notes: true
