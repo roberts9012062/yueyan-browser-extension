@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 手册版本 | v1.4 |
+| 手册版本 | v1.4.1 |
 | 代码位置 | 仓库根目录 `browser-extension/` |
 | 目标浏览器 | Google Chrome、Microsoft Edge（Chromium 内核） |
 | 配套主站 | 月言博客平台（boke，架构文档见 `architecture.md`） |
@@ -445,7 +445,7 @@ chrome.contextMenus.onClicked（background）
 
 | 菜单 | 任务 kind | 过程 | 交互 | 完成 |
 |---|---|---|---|---|
-| 📝 总结本页，发布到博客 | `summary` | `yy-page-text` 取正文与内容区图片（≤9 张，与 AI 网页总结同规则）→ AI 流式总结（实时预览）→ markdown **渲染为富文本**（原文图片均匀插入、尾附原文出处）；并行 AI 生成标题/标签/SEO（`generateArticleMeta`，与「生成文章」同一套，失败降级手填） | RichEditor 富文本编辑（图片可视化）+ 标题/标签/SEO 编辑 + 可见性；存草稿 / 发布 | `routeArticleImages` 按设置图床路由（none/tg/cf，与「生成文章」一致）→ `createPost(article)`（含 seo 与 tags）+ `/posts/{id}` 链接 |
+| 📝 总结本页，发布到博客 | `summary` | 来源页为 **B 站视频页**时取视频字幕总结（复用 `shared/bili-video.ts`，与 AI 助手网页总结的 B 站分支同一实现：注入页面取 cid/字幕列表 → 扩展页拉字幕全文；字幕不可得时自动回退普通网页总结并在执行卡提示原因）；普通网页 `yy-page-text` 取正文与内容区图片（≤9 张，与 AI 网页总结同规则）→ AI 流式总结（实时预览）→ markdown **渲染为富文本**（网页：原文图片均匀插入、尾附原文出处；B 站：头部嵌 bilibili 播放器块、尾附原视频链接）；并行 AI 生成标题/标签/SEO（`generateArticleMeta`，与「生成文章」同一套，失败降级手填） | RichEditor 富文本编辑（图片可视化）+ 标题/标签/SEO 编辑 + 可见性；存草稿 / 发布 | `routeArticleImages` 按设置图床路由（none/tg/cf，与「生成文章」一致）→ `createPost(article)`（含 seo 与 tags）+ `/posts/{id}` 链接 |
 | ⭐ 收藏本页（AI 自动分类） | `bookmark` mode=ai | 读书签树 → AI 推荐 JSON（folder/new_folder/title） | 下拉改选（根级/路径/新建）+ 标题编辑 | 写书签树（savedAt 调和）；未连接自动降级手动 |
 | 📁 收藏本页到指定文件夹… | `bookmark` mode=pick | 读书签树 | 同上（无 AI 步） | 同上；纯本地能力，未连接也可用 |
 | 🔍 截图本页，AI 分析 | `shot` | **直通**：右键手势内授权→页面立即出蒙版框选（Esc 取消=安静结束）→ captureVisibleTab → 携截图+选区投递任务，执行框打开即「裁剪×dpr→压缩→识图」 | 授权被拒降级「开始框选」兜底（screenshot-tools 共用）；结果区（重新框选 / 完成） | `ai.assist(recognize)`，结果经 MarkdownMessage 渲染（.md-body，与 AI 助手消息同款）+ 截图预览展示在执行卡，附「复制文字」一键复制识别文本 |
@@ -469,6 +469,7 @@ chrome.contextMenus.onClicked（background）
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v1.4.1 | 2026-09-12 | 0.35.1 修复落档：右键「总结本页」在 B 站视频页改走视频字幕总结——B 站字幕抓取/播放器块构造从 AiChatTab 内联抽为共享模块 `shared/bili-video.ts`（AI 助手网页总结 / 右键总结执行器 / 生成文章面板三处复用），§14.2 summary 行更新；B 站判定兼容 m.bilibili.com |
 | v1.4 | 2026-09-04 | 0.32.0 落档：右键「总结本页」发表前体验对齐「生成文章」——标签/SEO 由 AI 生成（generateArticleMeta 复用）、正文渲染为富文本（RichEditor + distributeImages/renderMarkdown）；§14.2 summary 行更新；执行器目录重排 tasks/ 子目录 |
 | v1.3.1 | 2026-09-04 | 0.31.1 两处修复落档：①右键「总结本页」抓取内容区图片并按 publishImageBed 图床路由发布（yy-page-text 增 images、distributeImages 复用、routeArticleImages 接入）；②执行框关不掉根因（扩展页 runtime.sendMessage 不投递 content script）——yy-exec-close 改经 background 转发；dock 补点击外部收起；收起/关闭统一移除 iframe |
 | v1.3 | 2026-09-04 | 新功能「右键菜单 + 悬浮球执行框」落档：新增 §14（contextMenus 四条任务链路、ExecTask 三层投递、任务单消费者与两阶段认领、说说草稿篮、图片转存次序、桌宠忙碌态、面板兜底）；§8.1 消息通道超 10 条，`shared/messages/types.ts` 集中判别联合落地；§8.2 登记 `exec_task_v1` / `exec_moment_draft_v1`；§6.1 登记 `contextMenus` 权限；manifest 模板与目录结构对齐 v0.31.0 |
