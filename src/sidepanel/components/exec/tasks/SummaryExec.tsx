@@ -1,12 +1,13 @@
 // browser-extension/src/sidepanel/components/exec/tasks/SummaryExec.tsx
 // 右键任务「总结本页，发布到博客」执行器（发表前体验与 AI 助手「生成文章」一致）：
-//   【过程】dock 抓取正文与内容区图片（yy-page-text 既有通道，图片收集与 AI 页同规则）
-//           → AI 流式总结（执行框内实时滚动）→ markdown 渲染为富文本 HTML
-//           （原文图片均匀插入、尾附原文出处）；并行 AI 生成标题/标签/SEO
-//           （generateArticleMeta，与「生成文章」同一套逻辑，失败留空可手填）；
+//   【过程】grabSummarySource 统一抓取（B 站视频页取字幕总结，复用 shared/bili-video，
+//           字幕不可得自动回退普通网页总结并提示；普通网页经 dock yy-page-text 抓正文
+//           与图片）→ AI 流式总结 → 渲染为富文本（网页：原文图片均匀插入 + 尾附出处；
+//           B 站：头部嵌播放器块 + 尾附原视频链接）→ 并行 AI 生成标题/标签/SEO
+//           （generateArticleMeta，失败留空可手填）；
 //   【交互】RichEditor 富文本正文（图片可视化可删改）+ 标题/标签/SEO 编辑 + 可见性；
-//   【完成】正文图片按设置 publishImageBed 路由（routeArticleImages：站点服务器转存 /
-//           TG图床 / CF图床）→ createPost(article)（含 seo 与 tags），附「查看文章」链接。
+//   【完成】正文图片按设置 publishImageBed 路由（routeArticleImages：站点服务器 /
+//           TG图床 / CF图床）→ createPost(article)（含 seo 与 tags），附文章链接。
 
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -17,10 +18,11 @@ import type { SummaryExecTask } from '../../../../shared/messages/types';
 import { isConfigured } from '../../../../shared/storage/settings';
 import type { PluginSettings } from '../../../../shared/types';
 import { distributeImages, generateArticleMeta } from '../../ai/ArticlePanel';
-import type { ArticleMeta } from '../../ai/ArticlePanel';
+import type { ArticleMeta, ArticleMetaGenResult } from '../../ai/ArticlePanel';
 import { renderMarkdown } from '../../ai/MarkdownMessage';
 import type { RichEditorHandle } from '../../ai/RichEditor';
-import { buildSummaryPrompt, defaultArticleMeta, publishSummaryArticle } from './summary-helpers';
+import { defaultArticleMeta, grabSummarySource, publishSummaryArticle } from './summary-helpers';
+import type { SummarySource } from './summary-helpers';
 import { CompletionBox, ExecutorCard, NotConnectedGuide } from '../ExecutorCard';
 import type { StepInfo, StepState } from '../ExecutorCard';
 import { SummaryEditor } from './SummaryEditor';
@@ -41,9 +43,8 @@ export function SummaryExec(props: SummaryExecProps): ReactNode {
   const { settings, task } = props;
   const [phase, setPhase] = useState<Phase>(isConfigured(settings) ? 'grab' : 'noconn');
   const [failStep, setFailStep] = useState<FailStep>('');
-  const [pageText, setPageText] = useState<string>('');
-  /** 抓取到的内容区图片（AI 失败重试时仍可插图） */
-  const [pageImages, setPageImages] = useState<string[]>([]);
+  /** 抓取产出的总结素材装配计划（B 站视频 / 普通网页两条来源；AI 失败重试复用） */
+  const [source, setSource] = useState<SummarySource | null>(null);
   const [failNote, setFailNote] = useState<string>('');
   const [warnNote, setWarnNote] = useState<string>('');
   /** 流式总结实时预览（markdown 纯文本） */
@@ -60,23 +61,19 @@ export function SummaryExec(props: SummaryExecProps): ReactNode {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<RichEditorHandle | null>(null);
 
-  /** 抓正文与图片（dock 应答 {ok,title,url,text,images}；失败给出可读原因与重试） */
+  /** 抓总结素材（B 站视频页取字幕、普通网页取正文与图片；失败给出可读原因与重试） */
   async function runGrab(): Promise<void> {
     setPhase('grab');
     setFailStep('');
     setFailNote('');
+    setWarnNote('');
     try {
-      const reply: unknown = await chrome.tabs.sendMessage(task.tabId, { type: 'yy-page-text' });
-      const obj = reply as { ok?: boolean; text?: string; images?: unknown } | null;
-      if (typeof obj !== 'object' || obj === null || obj.ok !== true || typeof obj.text !== 'string' || obj.text === '') {
-        throw new ApiError('页面无可读正文', 0);
+      const grabbed = await grabSummarySource(task.tabId, task.pageTitle, task.pageUrl);
+      setSource(grabbed.source);
+      if (grabbed.warn !== '') {
+        setWarnNote(grabbed.warn);
       }
-      setPageText(obj.text);
-      const images: string[] = Array.isArray(obj.images)
-        ? obj.images.filter((v: unknown): boolean => typeof v === 'string')
-        : [];
-      setPageImages(images);
-      void runAi(obj.text, images);
+      void runAi(grabbed.source);
     } catch (err: unknown) {
       setFailStep('grab');
       setFailNote(err instanceof ApiError ? err.message : '正文抓取失败（页面可能未注入内容脚本）');
@@ -85,8 +82,9 @@ export function SummaryExec(props: SummaryExecProps): ReactNode {
 
   /**
    * AI 流式总结 → 渲染为富文本进入编辑；并行生成元信息（互不拖累，与「生成文章」一致）。
+   * 提示词与正文装配差异（网页出处 / B 站播放器块）由 SummarySource 携带。
    */
-  async function runAi(text: string, images: readonly string[]): Promise<void> {
+  async function runAi(src: SummarySource): Promise<void> {
     setPhase('ai');
     setFailStep('');
     setFailNote('');
@@ -102,7 +100,7 @@ export function SummaryExec(props: SummaryExecProps): ReactNode {
         settings.apiBaseUrl,
         settings.apiKey,
         model,
-        [{ role: 'user', content: buildSummaryPrompt(task.pageTitle, task.pageUrl, text) }],
+        [{ role: 'user', content: src.prompt }],
         4000,
         false,
         {
@@ -115,25 +113,31 @@ export function SummaryExec(props: SummaryExecProps): ReactNode {
       if (aggregated.trim() === '') {
         throw new ApiError('AI 未返回内容', 0);
       }
-      // 渲染为富文本：尾附原文出处 + 原文图片均匀插入（与「生成文章」同款规则）
-      const withSource: string = aggregated.trim() + `\n\n> 原文：[${task.pageTitle}](${task.pageUrl})`;
-      setHtml(renderMarkdown(distributeImages(withSource, images)));
+      // 渲染为富文本：按来源装配（尾附出处 + 图片均匀插入，B 站另嵌头部播放器块）
+      const bodyMarkdown: string = src.decorate(aggregated.trim());
+      setHtml(src.headHtml + renderMarkdown(distributeImages(bodyMarkdown, src.images)));
       setPhase('edit');
-      // 元信息并行生成（不阻塞编辑；失败留空可手填并提示）
+      // 元信息并行生成（不阻塞编辑；失败留空可手填并提示）。
+      // 长内容输入（B 站视频总结等）偶发上游超时：失败自动重试一次，
+      // 策略与「生成文章」的 genMeta 一致（ArticlePanel 同款）；提示用拼接，
+      // 不覆盖 B 站字幕降级等既有过程提示。
       void (async (): Promise<void> => {
         setMetaPending(true);
+        const genOnce = (): Promise<ArticleMetaGenResult | null> =>
+          generateArticleMeta(settings.apiBaseUrl, settings.apiKey, model, aggregated).catch((): null => null);
         try {
-          const gen = await generateArticleMeta(settings.apiBaseUrl, settings.apiKey, model, aggregated);
+          const first: ArticleMetaGenResult | null = await genOnce();
+          const gen: ArticleMetaGenResult | null = first !== null ? first : await genOnce();
           if (gen !== null) {
             setMeta(gen.meta);
             if (gen.meta.tags.length > 0) {
               setTags(gen.meta.tags.join(', '));
             }
           } else {
-            setWarnNote('标签 / SEO 自动生成失败，可手动填写');
+            setWarnNote((prev: string): string =>
+              (prev !== '' ? `${prev}；` : '') + '标签 / SEO 自动生成失败，可手动填写',
+            );
           }
-        } catch {
-          setWarnNote('标签 / SEO 自动生成失败，可手动填写');
         } finally {
           setMetaPending(false);
         }
@@ -211,7 +215,11 @@ export function SummaryExec(props: SummaryExecProps): ReactNode {
     : phase === 'done' ? 'done'
     : 'pending';
   const steps: readonly StepInfo[] = [
-    { label: '抓取网页正文与图片', state: s1, note: pageText !== '' ? `${pageText.length} 字${pageImages.length > 0 ? ` + ${pageImages.length} 图` : ''}` : '' },
+    {
+      label: source?.kind === 'bili' ? '抓取视频字幕' : '抓取网页正文与图片',
+      state: s1,
+      note: source !== null ? `${source.text.length} 字${source.images.length > 0 ? ` + ${source.images.length} 图` : ''}` : '',
+    },
     { label: 'AI 总结与元信息', state: s2, note: phase === 'ai' ? '生成中…' : '' },
     { label: '发布到博客', state: s3, note: phase === 'publishing' ? '处理图片并提交…' : '' },
   ];
@@ -246,7 +254,11 @@ export function SummaryExec(props: SummaryExecProps): ReactNode {
           {failStep === 'ai' && (
             <button
               type="button"
-              onClick={(): void => void runAi(pageText, pageImages)}
+              onClick={(): void => {
+                if (source !== null) {
+                  void runAi(source);
+                }
+              }}
               className="shrink-0 rounded-full border border-red-400/50 px-2.5 py-0.5 transition-colors duration-200 hover:bg-red-500/10"
             >
               重试
