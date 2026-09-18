@@ -13,6 +13,7 @@ import {
   sendAiChatStream,
 } from '../../../shared/api/endpoints';
 import { ApiError } from '../../../shared/api/client';
+import { buildBiliPlayerBlock } from '../../../shared/bili-video';
 import { downloadAndCache } from '../../../shared/storage/image-cache';
 import { VisibilityToggle } from '../VisibilityToggle';
 import type { Visibility } from '../VisibilityToggle';
@@ -258,14 +259,9 @@ export function ArticlePanel(props: ArticlePanelProps): React.ReactNode {
       if (bili !== null) {
         baseText += `\n\n📺 原视频：https://www.bilibili.com/video/${bili}/`;
       }
-      // B 站播放器块：boke bilibili-video 插件协议
-      // <div data-plugin-block="bilibili" data-props="{&quot;…}"></div>（props 值内引号须 &quot; 转义）
-      let playerBlock: string = '';
-      const bvidInProps: unknown = props.biliProps?.bvid;
-      if (props.biliProps !== null && typeof bvidInProps === 'string' && bvidInProps !== '') {
-        const propsJson: string = JSON.stringify(props.biliProps).replace(/"/g, '&quot;');
-        playerBlock = `<div data-plugin-block="bilibili" data-props="${propsJson}"></div>`;
-      }
+      // B 站播放器块：boke bilibili-video 插件协议（构造复用 shared/bili-video，
+      // 与右键「总结本页」执行器同一实现）
+      const playerBlock: string = buildBiliPlayerBlock(props.biliProps);
       setHtml(playerBlock + renderMarkdown(distributeImages(baseText, props.sourceImages)));
       setPhase('editing');
       if (errors.length > 0) {
